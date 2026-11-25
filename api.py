@@ -1,8 +1,70 @@
 import torch
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-
+import argparse
 from mlp import ShallowMLP
+from ppo_transformer_rl_training import Critic, Policy
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--architecture",help="choose between a shallow mlp, or mlp encoder + transformer decoder",
+                    default="shallow",type=str,choices=["shallow","transformer"])
+parser.add_argument("--model",help="PPO or Reinforce as the training policy",
+                    default="REINFORCE",type=str,choices=["PPO","REINFORCE"])
+parser.add_argument("--optimizer",help="AdamW or Muon as optimzer algorithm",
+                    default="AdamW",type=str,choices=["AdamW","MUON"])
+parser.add_argument("--device",help="cuda or cpu to run training", 
+                    default="cpu",type=str,choices=["cuda","cpu"])
+parser.add_argument("--input-size",help="size of the state vector", 
+                    default=22,type=int)
+parser.add_argument("--learning-rate-Policy",help="learning rate for training the policy",
+                    default=5e-4,type=float)
+parser.add_argument("--learning-rate-Critic",help="in case of ppo, learning rate to use on critic", 
+                    default=5e-4,type=float)
+parser.add_argument("--encoder-hidden-layers-num",help="number of hidden layers of the encoder", 
+                    default=25,type=int)
+parser.add_argument("--encoder-hidden-layer-size",help="size of hidden layer of the encoder",
+                    default=128,type=int)
+parser.add_argument("--encoder-output",help="output size of the encoder",
+                    default=64,type=int)
+parser.add_argument("--transformer-layers-num",help="number of transformer layers for the decoder", 
+                    default=2,type=int)
+parser.add_argument("--d-model",help="transformer block hidden size",
+                    default=64,type=int)
+parser.add_argument("--dropout",help="dropout rate in the benders",
+                    default=0.0,type=float)
+parser.add_argument("--n-head",help="number of heads in transformer",
+                    default=4,type=int)
+parser.add_argument("--critic-hidden-layers-num",help="number of hidden layers of the critic neural network",
+                    default=2,type=int) 
+parser.add_argument("--critic-hidden-layer-size",help="size of hidden layers of the critic",
+                    default=128,type=int)
+
+                     
+args = parser.parse_args() 
+
+policy = None
+critic = None
+
+if args["architecture"] == "transformer": 
+    policy = Policy(encoder_input_size=args["input_size"],encoder_hidden_layers_num=args["encoder_hidden_layers_num"], 
+                    encoder_hidden_layer_size=args["encoder_hidden_layer_size"],encoder_output=args["encoder_output"],
+                    transformer_layers_num=args["transformer_layer_num"],d_model=args["d_model"],
+                    n_head=args["n_head"],dropout=args["dropout"])
+    critic = Critic(input_size=args["input_size"],hidden_layers_num=args["critic_hidden_layers_num"],
+                    hidden_layer_size=args["critic_hidden_layer_size"])
+else:
+    policy = ShallowMLP(input_size=args["input_size"])
+
+
+def build_optimizer(module: torch.nn.Module, lr: float) -> torch.optim.Optimizer:
+    if args["optimizer"] == "MUON":
+        return torch.optim.Muon(module.parameters(), lr=lr)
+    return torch.optim.AdamW(module.parameters(), lr=lr)
+
+
+policy_optimizer = build_optimizer(policy, args["learning_rate_Policy"])
+critic_optimizer = build_optimizer(critic, args["learning_rate_Critic"]) if critic is not None else None
 
 # --- config ---
 INPUT_SIZE = 22   # 18 (state_vector) + 4 (per-subproblem: violation, duals_norm2, cost, subgradient_norm2)
@@ -10,6 +72,7 @@ TOP_K = 4
 GAMMA = 0.99
 LR = 1e-3
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 model = ShallowMLP(INPUT_SIZE).to(device)
 model.train()
