@@ -33,5 +33,7 @@ class Policy(nn.Module) :
     def forward(self,x) : 
         h = self.encoder(x) 
         z = self.transformer_decoder(h) 
-        return self.head(z).squeez(-1)
+        return self.head(z).squeeze(-1)
+
+# def train_with_PPO(x) : 
 
